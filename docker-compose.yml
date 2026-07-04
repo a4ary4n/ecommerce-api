@@ -1,0 +1,51 @@
+# =============================================================
+# Local development infrastructure: MySQL + Elasticsearch
+# Usage:
+#   docker compose up -d      -> start both services (detached)
+#   docker compose ps         -> check status
+#   docker compose logs -f    -> tail logs
+#   docker compose down       -> stop (data survives via volumes)
+#   docker compose down -v    -> stop AND wipe data (clean slate)
+#
+# The Spring Boot app runs from IntelliJ during development and
+# connects to these via localhost. The app joins this file as a
+# third service (with its own Dockerfile) at the end of the project.
+# =============================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ecommerce-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ecommerce          # auto-created on first boot
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.0
+    container_name: ecommerce-elasticsearch
+    environment:
+      - discovery.type=single-node       # no cluster discovery; local single instance
+      - xpack.security.enabled=false     # skip TLS/auth locally (note in README: enabled in prod)
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m   # cap memory; ES grabs GBs otherwise
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mysql_data:
+  es_data:
