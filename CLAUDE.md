@@ -36,31 +36,52 @@ at the end — the "README ledger" section below accumulates everything it must 
 
 ## Stack (decided)
 
-- Kotlin + Spring Boot 3.x, Gradle Kotlin DSL, JDK 17+
-- Spring Web, Spring Data JPA, MySQL Driver, Spring Data Elasticsearch (only these 4)
+- Kotlin + Spring Boot 4.1.0, Gradle Kotlin DSL, JDK 17+
+- Spring Web, Spring Data JPA, MySQL Driver, Spring Data Elasticsearch — the
+  original 4. Two more added during ingestion work, each for a concrete reason:
+  - `spring-boot-starter-restclient` — Boot 4.1 moved `RestClient`
+    auto-configuration into this separate module; `spring-boot-starter-webmvc`
+    alone doesn't pull it in (confirmed via jar inspection).
+  - `kotlinx-coroutines-core` — used deliberately, not decoratively (see
+    Ingestion section below for exactly where and why).
 - Config in `application.yml` (not .properties). `ddl-auto: validate` — Hibernate
   must NEVER create/modify tables; `schema.sql` (hand-written) is the source of truth.
   `open-in-view: false` deliberately.
-- MySQL 8.0 + Elasticsearch 8.14.0 run via docker-compose (already working, with
+- MySQL 8.0 + Elasticsearch 9.4.3 run via docker-compose (already working, with
   healthchecks). App runs from IntelliJ during dev against localhost ports.
+  (Bumped from 8.14.0: Spring Boot 4.1's managed Spring Data Elasticsearch 6.1.0
+  bundles Elastic's Java client v9.4.2, which only speaks to same-major-version
+  servers — Elastic's compatibility policy allows a server to accept one major
+  version behind, never a server serving a newer-major client.)
   App gets its own Dockerfile + compose service ONLY at the very end.
+- `schema.sql` is mounted into MySQL's `/docker-entrypoint-initdb.d/` in
+  docker-compose.yml, so it auto-applies on a genuinely fresh volume (was
+  previously loaded by hand — a gap found while tracing what a grader's first
+  `docker compose up` would actually do).
 
 ## Current status
 
 DONE:
-- MySQL schema designed, finalized, loaded into the running container (7 tables)
-- docker-compose.yml for mysql + elasticsearch (with healthchecks) working
+- MySQL schema designed, finalized (7 tables); schema.sql auto-applies via
+  docker-compose's MySQL init mount (fresh volumes only)
+- docker-compose.yml for mysql + elasticsearch (with healthchecks) working;
+  Elasticsearch on 9.4.3 (see Stack section for why)
 - Spring Boot project created, application.yml fully configured (datasource, JPA,
   ES, logging), boots cleanly against both containers
-- Git repo initialized, connected to public GitHub remote, 4 commits done
-  (project setup / schema.sql / docker-compose / application.yml)
+- JPA entities for all 7 tables (`entity/` package), verified against the live
+  schema via `ddl-auto: validate`
+- Ingestion pipeline complete and verified end-to-end against the live
+  containers (194/194 products, both directions, idempotent) — see Ingestion
+  section below for the full design
+- Git repo, connected to public GitHub remote, several commits done (project
+  setup / schema.sql / docker-compose / application.yml / JPA entities / ...)
 
 PENDING (in order):
-1. JPA entities for the 7 tables
-2. Ingestion: fetch dummyjson (paginated!) -> MySQL -> flattened docs -> ES
-3. REST endpoints
-4. App Dockerfile + compose `app` service (profile for container hostnames)
-5. README (written by you, from the ledger below)
+1. REST endpoints
+2. App Dockerfile + compose `app` service (profile for container hostnames;
+   sets `APP_INGEST_MYSQL_ENABLED=true` and `APP_INGEST_ELASTICSEARCH_ENABLED=true`
+   so both ingestion flows run automatically on `docker compose up`)
+3. README (written by you, from the ledger below)
 
 ## MySQL schema — 7 tables (FINAL, do not alter without discussion)
 
@@ -79,10 +100,16 @@ product_images(id PK autoincr, product_id FK, url VARCHAR(500), sort_order)
 tags(id PK, name UNIQUE)
 product_tags(product_id, tag_id — composite PK, both FK)
 
-Entity-mapping traps to handle correctly: nullability must match DDL exactly;
-availability_status via @Enumerated(EnumType.STRING) (never ORDINAL);
-DECIMAL columns as BigDecimal (never Double); product_tags composite key via
-@EmbeddedId or @IdClass.
+Entity-mapping traps handled (confirmed via `ddl-auto: validate` against the live
+schema, not just by inspection): nullability matches DDL exactly, including
+columns with a `DEFAULT` but no `NOT NULL` (nullable in Kotlin too, since
+Hibernate always writes explicit values and ignores DB defaults anyway);
+availability_status via @Enumerated(EnumType.STRING) (never ORDINAL); DECIMAL
+columns as BigDecimal (never Double); product_tags composite key via
+@EmbeddedId + @MapsId (not @IdClass); TINYINT -> Byte, SMALLINT -> Short (not
+both mapped to Int — schema validation caught this); MySQL TEXT columns need
+@JdbcTypeCode(SqlTypes.LONGVARCHAR), not @Lob (which expects LONGTEXT and fails
+validation against a plain TEXT column).
 
 ## Elasticsearch design (FINAL)
 
@@ -132,20 +159,83 @@ Mapping decisions:
 - GET /products?category= — filter (ES)
 (query and category are the same endpoint with optional params, plus the extras above)
 
-## Ingestion script requirements
+## Ingestion (FINAL, implemented and verified)
 
-- dummyjson paginates: default returns only 30 products. MUST fetch all
-  (limit/skip loop or limit=0). This is a known gotcha; handle explicitly.
-- Flow: fetch -> upsert MySQL (normalized: resolve/create categories, brands, tags)
-  -> read back with joins -> build flat docs -> bulk index to ES.
-- Idempotent re-runs (decide: wipe-and-reload is acceptable; document the choice).
-- Map display strings to enum codes ("In Stock" -> IN_STOCK).
-- Basic sanity checks (skip+log malformed rows); no heavy validation — trusted
-  source data. No CHECK constraints, no review-date assertions (deliberate).
+Two independently triggerable flows, not one combined pipeline — reinforces MySQL
+as the actual source of truth (the ES-refresh flow's only dependency is MySQL,
+never the network):
+
+1. **`ProductCatalogSyncService.sync()`** (dummyjson -> MySQL), gated by
+   `app.ingest.mysql.enabled` via `ProductCatalogSyncRunner` (a
+   `@ConditionalOnProperty`-gated `CommandLineRunner`).
+2. **`ProductSearchIndexService.reindex()`** (MySQL -> Elasticsearch, no network
+   call at all), gated by `app.ingest.elasticsearch.enabled` via
+   `ProductSearchIndexRunner`. Reads MySQL fresh and rebuilds the ES index from
+   that — nothing here ever touches dummyjson.
+
+Both runners are `@Order`-annotated (sync=1, reindex=2) so that if both flags are
+set together in one boot (the eventual docker-compose `app` service does this),
+sync always completes before reindex reads MySQL. Verified independently: with
+only the mysql flag set, ES is untouched (confirmed by deleting the index first
+and checking it stays absent); with only the elasticsearch flag set, ES is
+rebuilt purely from whatever's already in MySQL.
+
+Flow 1 (sync) details:
+- dummyjson paginates (default 30 products) — fetched via `limit=0`, a documented
+  dummyjson feature returning all 194 items in one call. Categories come from the
+  separate `/products/categories` endpoint (the only source of proper display
+  names; a product's own `category` field is just the slug).
+- Idempotency: **wipe-and-reload**, confirmed as the strategy. Every sync run
+  deletes all 7 tables in FK-safe order (`product_tags -> reviews ->
+  product_images -> products -> categories -> brands -> tags`) and reloads fresh.
+  Safe to run on every container boot; reviews/images have no natural key from the
+  source anyway, so a "real" upsert would still need delete-and-reinsert for those
+  regardless — wipe-and-reload just applies that uniformly.
+- `products.created_at` uses dummyjson's own `meta.createdAt` (never fabricated).
+  `products.updated_at` is instead set to the sync run's own current timestamp —
+  it tracks when *our* system last touched the row, and will be bumped again once
+  REST endpoints support modifying products (a future PUT/PATCH's job).
+- Categories/brands/tags resolved via in-memory caches during the sync run (safe
+  to skip a DB existence check since the tables were just wiped).
+- A product with no brand (the JSON key is *absent*, not `null`) maps to Kotlin
+  `null` via `jackson-module-kotlin`'s constructor-default fill-in, stored as
+  `NULL` in `brand_id` — never coerced to an empty string or a sentinel brand.
+- `availabilityStatus` display strings ("In Stock" etc.) mapped to the enum via
+  an explicit `when`; skip+log the product if unrecognized (no heavy validation —
+  trusted source data, not untrusted input).
+- Money/rating/dimension `Double -> BigDecimal` conversions use
+  `BigDecimal.valueOf(double)`, never Kotlin's `Double.toBigDecimal()` (which
+  preserves the double's exact binary value with no rounding, producing visible
+  float noise like `19.9899999999999999911182...` instead of `19.99`).
+- Mapping code is Kotlin extension functions (`dto.toEntity(...)`,
+  `product.toDocument(tags)`), not a static mapper object — reads at the call
+  site as "this value becomes that."
+- `kotlinx.coroutines`: the two independent dummyjson HTTP calls (categories,
+  products) are fetched concurrently via `async`/`await`. The MySQL write itself
+  stays a single sequential blocking call (just offloaded via
+  `withContext(Dispatchers.IO)`) — not parallelized internally or against
+  anything else, since it's a single `@Transactional` method backed by one
+  non-thread-safe Hibernate `Session`.
+
+Flow 2 (reindex) details:
+- Reads `Product` + lazy `category`/`brand` via one `JOIN FETCH` /
+  `LEFT JOIN FETCH` query (brand is nullable, category isn't) and all products'
+  tags via one batched `IN (...)` query — two queries total regardless of product
+  count, no N+1, correct under `open-in-view: false`.
+- `ElasticsearchIndexer` owns the index lifecycle explicitly: drops and recreates
+  the `products` index every reindex run. `ProductDocument` is annotated
+  `@Document(..., createIndex = false)` — Spring Data Elasticsearch's own default
+  (`createIndex = true`) auto-creates an empty index the moment the
+  `ProductSearchRepository` bean is constructed, unconditionally on every app
+  boot regardless of our own flags, which would silently defeat the mysql-only
+  flow's guarantee of never touching ES.
+- No coroutines in this flow — a single MySQL read followed by a single ES bulk
+  write has no independent concurrent work to overlap, unlike flow 1's two HTTP
+  calls.
 
 ## Naming conventions (decided)
 
-Project/artifact: ecommerce-api · package: dev.aryan.ecommerce · 
+Project/artifact: ecommerce-api · package: dev.aryan.ecommerceapi ·
 DB: ecommerce · ES index: products · compose services: app, mysql, elasticsearch
 (service names double as DNS hostnames in the compose network)
 
@@ -200,14 +290,41 @@ Design choices:
   returning the full catalog in one response isn't viable; documented as an
   assumption taken rather than a question asked.
 - Ingestion handles dummyjson's pagination explicitly (default response is only
-  30 products; all products are fetched).
-- Ingestion idempotency: state the chosen strategy (wipe-and-reload or upsert)
-  and why.
+  30 products; fetched in one call via `limit=0`, a documented dummyjson feature,
+  rather than a manual limit/skip loop).
+- Ingestion idempotency: wipe-and-reload. Every sync run deletes all 7 tables
+  (FK-safe order) and reloads fresh from dummyjson. Chosen over a "real" upsert
+  because reviews/images have no natural key from the source anyway — an upsert
+  would still need delete-and-reinsert for those children regardless, so
+  wipe-and-reload just applies that same logic uniformly across the whole
+  catalog. Needs to be safe to re-run on every container boot in the eventual
+  compose deployment, which this guarantees.
+- Ingestion is split into two independently triggerable flows — dummyjson->MySQL
+  and MySQL->Elasticsearch — rather than one combined pipeline. Reinforces MySQL
+  as the actual source of truth: the search-index-refresh flow's only dependency
+  is MySQL, and it is structurally incapable of reaching dummyjson (no HTTP
+  client wired into that path at all), not just conventionally discouraged from
+  it. Ordered so both can still run together in one boot for the normal
+  deployment path.
+- `kotlinx.coroutines` used where it's structurally correct, not decoratively:
+  the two independent dummyjson HTTP calls (categories, products) run
+  concurrently via `async`/`await`. The MySQL write/read steps are deliberately
+  NOT parallelized against each other or internally — they're `@Transactional`
+  JPA operations backed by a single non-thread-safe Hibernate `Session`, so
+  concurrency there would be a correctness bug, not an optimization. The
+  MySQL->ES flow uses no coroutines at all — a single read then a single write
+  has no independent work worth overlapping.
+- Ingestion mapping code (DTO -> entity -> ProductDocument) is written as Kotlin
+  extension functions, not a static mapper class — idiomatic Kotlin, reads at
+  the call site as "this value becomes that" rather than a utility-class call.
 - ddl-auto: validate — hand-written schema.sql is authoritative; Hibernate
   verifies mappings at boot but never mutates the schema.
 - open-in-view: false — avoids the OSIV anti-pattern (hidden N+1s, connections
   held across the whole request); fetching is deliberate in the service layer.
-- Lean dependency list (4 starters) — nothing speculative.
+- Lean dependency list — started at 4 starters; two more added during ingestion
+  for concrete, load-bearing reasons (RestClient auto-configuration moved to its
+  own Boot 4.1 module; kotlinx-coroutines for the one place concurrency
+  genuinely helps) — nothing speculative.
 
 Known limitations / trade-offs (state honestly, each is deliberate):
 - Reviewer identity not normalized (no users table) — source data has no stable
@@ -228,6 +345,13 @@ Known limitations / trade-offs (state honestly, each is deliberate):
   minDiscount filter, natural-language query parsing ("perfumes under $10") —
   structured params (minPrice/maxPrice etc.) are the right interface; query
   understanding is a dedicated NLP subsystem out of scope for this assignment.
+- Splitting ingestion into two independently triggerable flows means running
+  only the mysql-sync flow leaves Elasticsearch stale relative to MySQL until
+  the reindex flow is also triggered — accepted because the real deployment
+  path (docker-compose `app` service) always enables both together; the
+  decoupling is for operational flexibility (e.g. rebuilding the search index
+  alone after an ES mapping change, without re-fetching from dummyjson), not
+  a claim that they auto-stay in sync.
 
 README tone: plain and factual, first person, short rationale per point — not
 marketing language. Structure: How to run · Architecture overview · Design
