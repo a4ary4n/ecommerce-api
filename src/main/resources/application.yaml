@@ -18,6 +18,13 @@ spring:
   elasticsearch:
     uris: http://localhost:9200
 
+app:
+  ingest:
+    mysql:
+      enabled: false       # dummyjson -> MySQL (APP_INGEST_MYSQL_ENABLED env var)
+    elasticsearch:
+      enabled: false       # MySQL -> Elasticsearch, no network call (APP_INGEST_ELASTICSEARCH_ENABLED env var)
+
 logging:
   level:
     org.hibernate.sql: debug
