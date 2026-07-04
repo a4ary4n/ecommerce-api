@@ -1,0 +1,63 @@
+package dev.aryan.ecommerceapi.web
+
+import dev.aryan.ecommerceapi.entity.Category
+import dev.aryan.ecommerceapi.entity.Product
+import dev.aryan.ecommerceapi.entity.ProductImage
+import dev.aryan.ecommerceapi.entity.Review
+import dev.aryan.ecommerceapi.web.dto.CategorySummary
+import dev.aryan.ecommerceapi.web.dto.ProductDetailResponse
+import dev.aryan.ecommerceapi.web.dto.ProductImageResponse
+import dev.aryan.ecommerceapi.web.dto.ReviewResponse
+
+fun Category.toSummary(): CategorySummary = CategorySummary(
+    id = id!!, // IDENTITY-generated, always populated once persisted/read back
+    slug = slug,
+    name = name,
+)
+
+fun Review.toResponse(): ReviewResponse = ReviewResponse(
+    rating = rating,
+    comment = comment,
+    reviewerName = reviewerName,
+    reviewerEmail = reviewerEmail,
+    reviewDate = reviewDate,
+)
+
+fun ProductImage.toResponse(): ProductImageResponse = ProductImageResponse(
+    url = url,
+    sortOrder = sortOrder,
+)
+
+fun Product.toDetailResponse(
+    reviews: List<Review>,
+    images: List<ProductImage>,
+    tags: List<String>,
+): ProductDetailResponse = ProductDetailResponse(
+    id = id,
+    title = title,
+    description = description,
+    category = category.toSummary(),
+    brand = brand?.name,
+    sku = sku,
+    price = price,
+    discountPercentage = discountPercentage,
+    rating = rating,
+    stock = stock,
+    availabilityStatus = availabilityStatus.name,
+    weight = weight,
+    width = width,
+    height = height,
+    depth = depth,
+    warrantyInformation = warrantyInformation,
+    shippingInformation = shippingInformation,
+    returnPolicy = returnPolicy,
+    minimumOrderQuantity = minimumOrderQuantity,
+    thumbnail = thumbnail,
+    barcode = barcode,
+    qrCode = qrCode,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    tags = tags,
+    images = images.map { it.toResponse() },
+    reviews = reviews.map { it.toResponse() },
+)
