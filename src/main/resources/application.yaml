@@ -1,3 +1,23 @@
 spring:
   application:
     name: ecommerce-api
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/ecommerce
+    username: root
+    password: root
+
+  jpa:
+    hibernate:
+      ddl-auto: validate        # never modify schema; schema.sql is the source of truth
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  elasticsearch:
+    uris: http://localhost:9200
+
+logging:
+  level:
+    org.hibernate.sql: debug
