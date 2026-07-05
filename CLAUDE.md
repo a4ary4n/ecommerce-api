@@ -101,12 +101,28 @@ DONE:
   Verified end-to-end: fresh `docker compose build app`, full stack up, both
   ingestion flows ran automatically (194/194), all endpoints reachable via
   container hostnames, and a restart re-ran ingestion safely (194, not 388).
+- README written (`README.md`, from this ledger) — how to run, architecture
+  overview, design decisions, API reference, known limitations.
+- Logging added across ingestion/service/search/web layers (SLF4J,
+  `LoggerFactory.getLogger(javaClass)`) — INFO for ingestion lifecycle events,
+  DEBUG for per-request search/lookup activity, WARN for rejected requests.
+- Full manual test pass against a genuinely fresh `docker compose down -v` +
+  `up --build` (not just the already-running stack) — schema auto-init,
+  health-gated startup, both ingestion flows, idempotent restart, the full
+  endpoint/param/validation matrix, and a deliberate fuzz pass (type
+  mismatches, overflow, NaN/Infinity, malformed path variables, wrong HTTP
+  methods, unmapped routes) all verified against live containers. Found and
+  fixed one real bug this way (see the `InvalidSearchParameterException`
+  entry in the README ledger's Design choices below).
+- Automated test suite added (58 tests, 0 failures) — see the "Automated
+  tests" entry in the README ledger's Design choices below for what's covered
+  and why, and what's deliberately not.
 - Git repo, connected to public GitHub remote, several commits done (project
   setup / schema.sql / docker-compose / application.yml / JPA entities /
-  ingestion / REST endpoints / app Dockerfile+compose / ...)
+  ingestion / REST endpoints / app Dockerfile+compose / README / logging /
+  automated tests / ...)
 
-PENDING (in order):
-1. README (written by you, from the ledger below) — the only thing left
+PENDING: nothing — submission-ready.
 
 ## MySQL schema — 7 tables (FINAL, do not alter without discussion)
 
@@ -542,6 +558,52 @@ Design choices:
   ingestion pipeline's existing wipe-and-reload idempotency, is what makes
   `docker compose up` alone safe and self-populating on both first boot and
   every subsequent restart, with zero custom wait-for-it scripting.
+- **Automated tests (58, added after extensive manual verification)** — three
+  deliberately different kinds, chosen to cover what manual curl testing
+  couldn't easily lock in as a regression safety net:
+  - **Pure unit tests, no Spring context** for the two places with real logic:
+    `ProductSearchQueryBuilderTest` (21 tests) asserts directly on the built
+    `co.elastic.clients` `Query`/`NativeQuery` object graph (must/filter
+    clause contents, field targeting, sort options) rather than just
+    "does it throw" — catches the exact kind of filter-composition or
+    field-targeting regression (e.g. `brand` vs `brand.keyword`) that a
+    live-container curl test would only reveal by return-count mismatches.
+    `ProductMappingsTest`/`WebMappingsTest` (23 tests) cover the DTO->entity
+    and entity->response extension functions - BigDecimal conversion accuracy
+    (`BigDecimal.valueOf` vs `Double.toBigDecimal()`), null-brand handling,
+    `createdAt`/`updatedAt` source-vs-ingestion-timestamp semantics, and the
+    availability-status string mapping.
+  - **`@WebMvcTest` slice tests** (13 tests, `ProductControllerTest`/
+    `CategoryControllerTest`) exercise real Spring MVC dispatch - validation
+    annotations, path-variable conversion, the exception handler - with
+    `ProductSearchService`/`ProductDetailService`/`CategoryService` mocked out
+    via `@MockitoBean`, so no MySQL/Elasticsearch needed. Mock stubs use exact
+    expected argument values (`given(service.search(exactParams))`) rather
+    than Mockito's `any()` matchers - `ProductSearchParams` is a data class
+    with structural equality, and this sidesteps the well-known Mockito/Kotlin
+    non-null-argument problem (`any()` returns `null`, which crashes against a
+    Kotlin non-nullable parameter type) without needing the `mockito-kotlin`
+    library as an extra dependency.
+  - One of the 13 slice tests is a direct regression test for the
+    `InvalidSearchParameterException` bug found during the final manual test
+    pass (see above): `GET /products/abc` must return Spring's own default
+    400 body, not our custom `{"error": ...}` shape.
+  - **Deliberately not added: integration tests against real MySQL/Elasticsearch**
+    (e.g. via Testcontainers) - would need a new dependency and real
+    infrastructure cost, and this stack has already been verified end-to-end,
+    repeatedly, against the live containers (including a genuinely fresh
+    `docker compose down -v && up --build`, not just the already-running
+    stack). Not worth duplicating for a take-home assignment; noted here as a
+    deliberate scope boundary, matching the project's read-only-API and
+    validation-scope entries elsewhere in this file.
+  - Found during setup, not assumed from older docs (same "verify, don't
+    guess" discipline as the `RestClient` module split and the ES
+    compatibility direction): Spring Boot 4.1 also moved `@WebMvcTest` itself
+    into its own module/package
+    (`org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest`, not the
+    older `org.springframework.boot.test.autoconfigure.web.servlet` path) -
+    confirmed by inspecting the actual `spring-boot-webmvc-test` jar rather
+    than trusting the class name from memory.
 
 Known limitations / trade-offs (state honestly, each is deliberate):
 - Read-only API, by design, not by omission — the assignment brief specifies

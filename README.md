@@ -44,6 +44,9 @@ against `localhost` ports. In this mode ingestion does *not* run automatically
 outside the compose `app` service); trigger it manually when you want fresh data,
 e.g. `./gradlew bootRun --args='--app.ingest.mysql.enabled=true --app.ingest.elasticsearch.enabled=true'`.
 
+**Running the tests**: `./gradlew test` — 58 tests, no Docker/MySQL/Elasticsearch
+needed (see [Automated tests](#automated-tests) below for what they cover).
+
 ## Architecture overview
 
 ```
@@ -268,6 +271,32 @@ config/       the RestClient bean used to call dummyjson
   idempotency, is what makes a single `docker compose up` reliably self-populating
   on both a first run and every subsequent restart.
 
+### Automated tests
+
+Added after this API had already been thoroughly verified by hand against the live
+containers (every endpoint, every parameter, every validation boundary, and a
+deliberate fuzz pass — type mismatches, numeric overflow, NaN/Infinity, malformed
+path variables, wrong HTTP methods). The 58 automated tests are there to keep that
+behavior locked in, not to re-discover it, so they're aimed at exactly the two kinds
+of test that don't need real infrastructure:
+
+- **Pure unit tests** for the two places with real logic: `ProductSearchQueryBuilder`
+  (asserting directly on the built Elasticsearch query's must/filter clauses and
+  field targeting — e.g. that `brand` filters on `brand.keyword`, not the analyzed
+  text field — rather than only checking whether it throws) and the mapping
+  extension functions (BigDecimal conversion accuracy, null-brand handling,
+  `createdAt`/`updatedAt` semantics).
+- **`@WebMvcTest` slice tests** for both controllers — real Spring MVC dispatch
+  (validation, path-variable conversion, exception handling) with the services
+  mocked out, no MySQL/Elasticsearch needed. One of these is a direct regression
+  test for the `InvalidSearchParameterException` bug above: `GET /products/abc`
+  must return Spring's own default 400 body, not the custom `{"error": ...}` shape.
+- **Deliberately not added**: integration tests against real MySQL/Elasticsearch
+  (e.g. via Testcontainers) — a new dependency and real setup cost that wouldn't
+  tell me much this stack's extensive manual verification (including a genuinely
+  fresh `docker compose down -v && up --build`) hasn't already confirmed. Noted as
+  a scope boundary, not an oversight, same as the read-only API decision above.
+
 ## API reference
 
 ### `GET /categories`
@@ -321,6 +350,10 @@ curl "http://localhost:8080/products?brand=Apple&inStock=true"
 
 - **Read-only API, deliberately** — the assignment brief specifies five read
   endpoints; no write endpoints exist or were planned.
+- **No integration tests against real MySQL/Elasticsearch** (e.g. via
+  Testcontainers) — the 58 automated tests are unit and `@WebMvcTest` slice
+  tests only (see [Automated tests](#automated-tests) above); this stack has
+  already been verified end-to-end, repeatedly, against the live containers.
 - **Reviewer identity isn't normalized** into its own table — the source data has no
   stable user id, so inventing one would fabricate a relationship that doesn't exist.
   Reviewer name/email are kept as plain columns on the review itself.
