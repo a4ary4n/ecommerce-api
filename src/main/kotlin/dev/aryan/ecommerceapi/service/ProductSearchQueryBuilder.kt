@@ -11,7 +11,17 @@ import org.springframework.data.elasticsearch.client.elc.NativeQuery
 // by responsibility.
 object ProductSearchQueryBuilder {
 
+    // Elasticsearch's default index.max_result_window - a search request whose
+    // from(=page*size)+size exceeds this fails server-side with a search_phase_execution_exception
+    // (all shards failed), which otherwise surfaces as an uncaught 500. Validated here instead,
+    // same pattern as the page/size >= 0/1 check PageRequest.of() already enforces.
+    private const val MAX_RESULT_WINDOW = 10_000L
+
     fun build(params: ProductSearchParams): NativeQuery {
+        val from = params.page.toLong() * params.size
+        require(from + params.size <= MAX_RESULT_WINDOW) {
+            "page*size + size must not exceed $MAX_RESULT_WINDOW (Elasticsearch's index.max_result_window)"
+        }
         // blank ("" or whitespace-only) is treated the same as absent - otherwise an empty
         // multi_match/term query analyzes to zero terms and matches ZERO documents in ES
         // (not "match everything"), which would surprise a client that left a search box
