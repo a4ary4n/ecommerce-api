@@ -6,6 +6,8 @@ import dev.aryan.ecommerceapi.web.dto.PageResponse
 import dev.aryan.ecommerceapi.web.dto.ProductDetailResponse
 import dev.aryan.ecommerceapi.web.dto.ProductSearchParams
 import dev.aryan.ecommerceapi.web.dto.ProductSummaryResponse
+import jakarta.validation.constraints.DecimalMax
+import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import org.springframework.http.ResponseEntity
@@ -27,10 +29,18 @@ class ProductController(
     fun search(
         @RequestParam query: String?,
         @RequestParam category: String?,
+        @RequestParam brand: String?,
+        @RequestParam @DecimalMin("0.0") minPrice: Double?,
+        @RequestParam @DecimalMin("0.0") maxPrice: Double?,
+        @RequestParam @DecimalMin("0.0") @DecimalMax("5.0") minRating: Double?,
+        @RequestParam inStock: Boolean?,
+        @RequestParam sort: String?,
         @RequestParam(defaultValue = "0") @Min(0) page: Int,
         @RequestParam(defaultValue = "20") @Min(1) @Max(100) size: Int,
     ): PageResponse<ProductSummaryResponse> =
-        productSearchService.search(ProductSearchParams(query, category, page, size))
+        productSearchService.search(
+            ProductSearchParams(query, category, brand, minPrice, maxPrice, minRating, inStock, sort, page, size)
+        )
 
     @GetMapping("/{id}")
     fun getById(@PathVariable id: Int): ResponseEntity<ProductDetailResponse> =
