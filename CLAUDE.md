@@ -363,12 +363,16 @@ Design choices:
   description is prose). Category is deliberately EXCLUDED from full-text and is
   a filter only — including it would drown ranking (e.g. "fragrance" matching
   every product in the category via that field).
-- Structured constraints (category, brand, price, rating, stock) live in ES
-  filter context, not query context — no scoring cost, cacheable. query+filters
-  compose into a single bool query; one query builder serves every param
-  combination.
-- Sorting: relevance (_score) by default when ?query= is present; explicit
-  sort (price/rating) otherwise — scoring and ordering are separable concerns.
+- Structured constraints (category, brand, price range, rating, availability)
+  live in ES filter context, not query context — no scoring cost, cacheable.
+  query+filters compose into a single bool query; one query builder serves
+  every param combination.
+- Sorting: an explicit `sort` param (`price_asc`/`price_desc`/`rating_desc`)
+  always overrides scoring, regardless of whether `?query=` is present.
+  Without an explicit `sort`, the default is relevance (`_score`) when `?query=`
+  is present, or alphabetical by title when it isn't (a bare listing has no
+  natural relevance order to fall back on) — scoring and ordering are
+  separable concerns, but an explicit sort choice always wins.
 - fuzziness AUTO on multi_match — cheap typo tolerance.
 - Pagination implemented (page/size) even though unspecified — a listing API
   returning the full catalog in one response isn't viable; documented as an
