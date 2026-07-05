@@ -339,6 +339,15 @@ Known limitations / trade-offs (state honestly, each is deliberate):
 - xpack security disabled for local ES — TLS/auth would be enabled in production.
 - Standard analyzer only — production search would add synonym handling and
   autocomplete (edge n-grams). Listed as extensions, deliberately out of scope.
+  Concretely observed: `fuzziness: AUTO` scales allowed edit distance by query
+  length (0 edits for 0-2 chars, 1 edit for 3-5, 2 edits for 6+) — so
+  `?query=perf` and `?query=perfu` return nothing while `?query=perfum`/
+  `perfume` match products tagged "perfumes" (edit distance 2 and 1
+  respectively, both within the length-6+ bucket's allowance; the shorter
+  queries need 3-4 edits, which exceeds their 1-edit bucket). This is
+  typo-tolerance on complete-ish words, not prefix/incomplete-word
+  autocomplete — those are genuinely different features, and this is expected
+  behavior given the above, not a bug.
 - Validation is light (skip+log malformed rows at ingestion) — the source is a
   trusted fixed dataset, not untrusted user input.
 - Possible extensions not built (by choice, not oversight): tags filter,
