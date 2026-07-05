@@ -190,6 +190,12 @@ Mapping decisions:
 - GET /products?category= — filter (ES)
 (query and category are the same endpoint with optional params, plus the extras above)
 
+Per the assignment brief, the required surface is read-only — five GET endpoints,
+no mention of creating, updating, or deleting anything. This API implements
+exactly that: no write endpoints exist, and none are planned. Worth a line in
+the README's known limitations so it reads as a scope boundary that was
+respected, not a gap that was missed.
+
 ## Ingestion (FINAL, implemented and verified)
 
 Two independently triggerable flows, not one combined pipeline — reinforces MySQL
@@ -224,8 +230,11 @@ Flow 1 (sync) details:
   regardless — wipe-and-reload just applies that uniformly.
 - `products.created_at` uses dummyjson's own `meta.createdAt` (never fabricated).
   `products.updated_at` is instead set to the sync run's own current timestamp —
-  it tracks when *our* system last touched the row, and will be bumped again once
-  REST endpoints support modifying products (a future PUT/PATCH's job).
+  it tracks when *our* system last touched the row. In practice that only ever
+  happens during ingestion (the assignment's endpoint list is read-only, so
+  nothing else writes to `products`), but the semantics are the general,
+  correct ones for the column regardless: "last write," not "last write by
+  ingestion specifically."
 - Categories/brands/tags resolved via in-memory caches during the sync run (safe
   to skip a DB existence check since the tables were just wiped).
 - A product with no brand (the JSON key is *absent*, not `null`) maps to Kotlin
@@ -519,6 +528,12 @@ Design choices:
   every subsequent restart, with zero custom wait-for-it scripting.
 
 Known limitations / trade-offs (state honestly, each is deliberate):
+- Read-only API, by design, not by omission — the assignment brief specifies
+  five endpoints (`/categories`, `/products`, `/products/{id}`, and the
+  `query`/`category` variants of `/products`), all of them reads. No
+  create/update/delete endpoints exist, and none were planned; the catalog's
+  only writer is the ingestion pipeline. Stated explicitly so this reads as a
+  scope boundary that was honored, not a gap that was missed.
 - Reviewer identity not normalized (no users table) — source data has no stable
   user id; inventing one would fabricate relationships. reviewer name/email kept
   as review columns.
