@@ -3,6 +3,7 @@ package dev.aryan.ecommerceapi.ingestion
 import dev.aryan.ecommerceapi.repository.ProductRepository
 import dev.aryan.ecommerceapi.repository.ProductTagRepository
 import dev.aryan.ecommerceapi.search.ProductDocument
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 
@@ -16,6 +17,7 @@ class ProductCatalogReader(
     private val productRepository: ProductRepository,
     private val productTagRepository: ProductTagRepository,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * All products as [ProductDocument]s. Exactly two queries regardless of catalog size -
@@ -32,6 +34,8 @@ class ProductCatalogReader(
         val tagsByProductId = productTagRepository
             .findTagNamesForProducts(products.map { it.id })
             .groupBy({ it.getProductId() }, { it.getTagName() })
+
+        log.info("read {} products back from MySQL, {} with at least one tag", products.size, tagsByProductId.size)
 
         return products.map { product ->
             product.toDocument(tagsByProductId[product.id].orEmpty())

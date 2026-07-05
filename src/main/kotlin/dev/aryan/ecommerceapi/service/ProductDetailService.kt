@@ -6,6 +6,7 @@ import dev.aryan.ecommerceapi.repository.ProductTagRepository
 import dev.aryan.ecommerceapi.repository.ReviewRepository
 import dev.aryan.ecommerceapi.web.dto.ProductDetailResponse
 import dev.aryan.ecommerceapi.web.toDetailResponse
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -17,6 +18,8 @@ class ProductDetailService(
     private val productImageRepository: ProductImageRepository,
     private val productTagRepository: ProductTagRepository,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     /**
      * Full detail for one product, or `null` if [id] doesn't exist. `readOnly` keeps the
      * Hibernate session open so `product.category`/`product.brand` (both `LAZY`) can
@@ -26,7 +29,11 @@ class ProductDetailService(
      */
     @Transactional(readOnly = true)
     fun getById(id: Int): ProductDetailResponse? {
-        val product = productRepository.findById(id).orElse(null) ?: return null
+        val product = productRepository.findById(id).orElse(null)
+        if (product == null) {
+            log.debug("product {} not found", id)
+            return null
+        }
         val reviews = reviewRepository.findByProductId(id)
         val images = productImageRepository.findByProductIdOrderBySortOrderAsc(id)
         val tags = productTagRepository.findTagNamesForProducts(listOf(id)).map { it.getTagName() }

@@ -3,6 +3,7 @@ package dev.aryan.ecommerceapi.search
 import co.elastic.clients.elasticsearch._types.SortOrder
 import co.elastic.clients.elasticsearch._types.query_dsl.Query
 import dev.aryan.ecommerceapi.web.dto.ProductSearchParams
+import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.elasticsearch.client.elc.NativeQuery
 
@@ -10,6 +11,7 @@ import org.springframework.data.elasticsearch.client.elc.NativeQuery
 // separate from ProductSearchService, mirroring how ingestion split writer/reader/indexer
 // by responsibility.
 object ProductSearchQueryBuilder {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     // Elasticsearch's default index.max_result_window - a search request whose
     // from(=page*size)+size exceeds this fails server-side with a search_phase_execution_exception
@@ -39,6 +41,11 @@ object ProductSearchQueryBuilder {
         val query = params.query?.trim()?.takeIf { it.isNotEmpty() }
         val category = params.category?.trim()?.takeIf { it.isNotEmpty() }
         val brand = params.brand?.trim()?.takeIf { it.isNotEmpty() }
+
+        log.debug(
+            "building query: text={} category={} brand={} minPrice={} maxPrice={} minRating={} inStock={} sort={}",
+            query != null, category, brand, params.minPrice, params.maxPrice, params.minRating, params.inStock, params.sort,
+        )
 
         val boolQuery = Query.of { q ->
             q.bool { b ->

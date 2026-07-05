@@ -10,6 +10,7 @@ import jakarta.validation.constraints.DecimalMax
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
+import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
@@ -25,6 +26,7 @@ class ProductController(
     private val productSearchService: ProductSearchService,
     private val productDetailService: ProductDetailService,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * List, full-text search, and filter products. `query`/`category`/`page`/`size` are the
@@ -67,6 +69,8 @@ class ProductController(
      * by default, hence this handler.
      */
     @ExceptionHandler(IllegalArgumentException::class)
-    fun handleInvalidRequest(ex: IllegalArgumentException): ResponseEntity<Map<String, String?>> =
-        ResponseEntity.badRequest().body(mapOf("error" to ex.message))
+    fun handleInvalidRequest(ex: IllegalArgumentException): ResponseEntity<Map<String, String?>> {
+        log.warn("rejected request: {}", ex.message)
+        return ResponseEntity.badRequest().body(mapOf("error" to ex.message))
+    }
 }

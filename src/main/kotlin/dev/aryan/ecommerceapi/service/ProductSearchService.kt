@@ -6,12 +6,14 @@ import dev.aryan.ecommerceapi.web.dto.PageResponse
 import dev.aryan.ecommerceapi.web.dto.ProductSearchParams
 import dev.aryan.ecommerceapi.web.dto.ProductSummaryResponse
 import dev.aryan.ecommerceapi.web.toSummaryResponse
+import org.slf4j.LoggerFactory
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations
 import org.springframework.stereotype.Service
 
 /** Backs `GET /products`'s list/search/filter behavior. */
 @Service
 class ProductSearchService(private val elasticsearchOperations: ElasticsearchOperations) {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * Runs the query [ProductSearchQueryBuilder] builds from [params] and maps the
@@ -23,6 +25,11 @@ class ProductSearchService(private val elasticsearchOperations: ElasticsearchOpe
 
         val content = hits.searchHits.map { it.content.toSummaryResponse() }
         val totalPages = if (params.size > 0) ((hits.totalHits + params.size - 1) / params.size).toInt() else 0
+
+        log.debug(
+            "search query='{}' category={} brand={} -> {} hits (page {} of {})",
+            params.query, params.category, params.brand, hits.totalHits, params.page, totalPages,
+        )
 
         return PageResponse(
             content = content,
