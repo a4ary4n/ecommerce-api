@@ -38,12 +38,16 @@ at the end — the "README ledger" section below accumulates everything it must 
 
 - Kotlin + Spring Boot 4.1.0, Gradle Kotlin DSL, JDK 17+
 - Spring Web, Spring Data JPA, MySQL Driver, Spring Data Elasticsearch — the
-  original 4. Two more added during ingestion work, each for a concrete reason:
+  original 4. Three more added since, each for a concrete reason, none speculative:
   - `spring-boot-starter-restclient` — Boot 4.1 moved `RestClient`
     auto-configuration into this separate module; `spring-boot-starter-webmvc`
     alone doesn't pull it in (confirmed via jar inspection).
   - `kotlinx-coroutines-core` — used deliberately, not decoratively (see
     Ingestion section below for exactly where and why).
+  - `spring-boot-starter-validation` — declarative `@Min`/`@Max` bounds on
+    `GET /products`'s `page`/`size` params, added after two real bugs (invalid
+    page/size crashing with 500 instead of 400) — see the README ledger's
+    Design choices for the full story, including a real `@Validated` trap.
 - Config in `application.yml` (not .properties). `ddl-auto: validate` — Hibernate
   must NEVER create/modify tables; `schema.sql` (hand-written) is the source of truth.
   `open-in-view: false` deliberately.
@@ -53,7 +57,9 @@ at the end — the "README ledger" section below accumulates everything it must 
   bundles Elastic's Java client v9.4.2, which only speaks to same-major-version
   servers — Elastic's compatibility policy allows a server to accept one major
   version behind, never a server serving a newer-major client.)
-  App gets its own Dockerfile + compose service ONLY at the very end.
+  App now also has its own Dockerfile + compose `app` service (done — see
+  Current status / Docker section below); IntelliJ-against-localhost remains
+  the day-to-day dev loop (`docker compose up -d mysql elasticsearch` only).
 - `schema.sql` is mounted into MySQL's `/docker-entrypoint-initdb.d/` in
   docker-compose.yml, so it auto-applies on a genuinely fresh volume (was
   previously loaded by hand — a gap found while tracing what a grader's first
@@ -73,15 +79,32 @@ DONE:
 - Ingestion pipeline complete and verified end-to-end against the live
   containers (194/194 products, both directions, idempotent) — see Ingestion
   section below for the full design
+- REST endpoints: `GET /categories`, `GET /products/{id}` (MySQL-backed), and
+  `GET /products` (Elasticsearch-backed: `query`/`category`/`page`/`size` only
+  so far — `brand`/`minPrice`/`maxPrice`/`sort` and Tier 2 `minRating`/`inStock`
+  deliberately deferred). All verified against the live containers, including
+  edge cases (blank query/category, out-of-range page, invalid page/size -> 400
+  not 500).
+- App Dockerfile (multi-stage: `eclipse-temurin:17-jdk` build stage running
+  `./gradlew bootJar`, `eclipse-temurin:17-jre` runtime stage) + `app` service
+  added to `docker-compose.yml`, gated on `mysql`/`elasticsearch` via
+  `depends_on: condition: service_healthy`. `application-docker.yaml` profile
+  (`SPRING_PROFILES_ACTIVE=docker`) overrides just the two connection URLs to
+  container hostnames (`mysql`, `elasticsearch`); everything else inherits from
+  the base `application.yaml`. Both ingest flags set `true` in compose (`false`
+  by default locally) so `docker compose up` alone self-populates both stores.
+  Verified end-to-end: fresh `docker compose build app`, full stack up, both
+  ingestion flows ran automatically (194/194), all endpoints reachable via
+  container hostnames, and a restart re-ran ingestion safely (194, not 388).
 - Git repo, connected to public GitHub remote, several commits done (project
-  setup / schema.sql / docker-compose / application.yml / JPA entities / ...)
+  setup / schema.sql / docker-compose / application.yml / JPA entities /
+  ingestion / REST endpoints / app Dockerfile+compose / ...)
 
 PENDING (in order):
-1. REST endpoints
-2. App Dockerfile + compose `app` service (profile for container hostnames;
-   sets `APP_INGEST_MYSQL_ENABLED=true` and `APP_INGEST_ELASTICSEARCH_ENABLED=true`
-   so both ingestion flows run automatically on `docker compose up`)
-3. README (written by you, from the ledger below)
+1. Extra `GET /products` params: `brand`, `minPrice`/`maxPrice`, `sort` (Tier 1
+   extras deferred from the search endpoint pass) and, if time, Tier 2
+   (`minRating`, `inStock`)
+2. README (written by you, from the ledger below)
 
 ## MySQL schema — 7 tables (FINAL, do not alter without discussion)
 
@@ -233,6 +256,59 @@ Flow 2 (reindex) details:
   write has no independent concurrent work to overlap, unlike flow 1's two HTTP
   calls.
 
+## Docker & deployment (FINAL, implemented and verified)
+
+`Dockerfile` (repo root) is a multi-stage build:
+- **Build stage** (`eclipse-temurin:17-jdk`): copies the Gradle wrapper +
+  `build.gradle.kts`/`settings.gradle.kts` first and runs `./gradlew
+  dependencies` before copying `src/` — dependency resolution lands in its own
+  Docker layer, only invalidated when build files change, not on every source
+  edit. Then `./gradlew bootJar`. `bootJar` does NOT depend on the `test` task
+  in the Spring Boot Gradle plugin, so the one existing test (`@SpringBootTest`
+  context-load, needs a live MySQL/ES connection) correctly never runs during
+  `docker build` — it wouldn't have anything to connect to at that point anyway.
+- **Runtime stage** (`eclipse-temurin:17-jre`, not `-jdk`): just the packaged
+  jar + `java -jar` — smaller image, no compiler needed to run a jar.
+- `.dockerignore` excludes `.git`/`.gradle`/`build`/`.idea`/`*.md` — build
+  speed only, doesn't affect correctness since the Dockerfile `COPY`s specific
+  paths rather than `COPY . .`.
+
+`src/main/resources/application-docker.yaml` — a Spring profile activated via
+`SPRING_PROFILES_ACTIVE=docker`, overriding ONLY `spring.datasource.url`
+(`mysql:3306`) and `spring.elasticsearch.uris` (`elasticsearch:9200`) to the
+compose network's container hostnames. Everything else (credentials, JPA
+settings, the ingest flags) inherits from the base `application.yaml` unchanged
+— profile YAML layers on top of, not instead of, the base file. Profile
+activation is set via compose `environment:`, not baked into the image, since
+it's a deployment concern, not an image property (the same image could run
+under a different profile elsewhere).
+
+`docker-compose.yml`'s new `app` service:
+- `depends_on: { mysql: {condition: service_healthy}, elasticsearch:
+  {condition: service_healthy} }` — the app container doesn't even start until
+  both stores are actually ready to accept connections (not just "container
+  running"). This is what makes `docker compose up` safe end-to-end with zero
+  custom wait-for-it scripting; the existing healthchecks on both dependencies
+  do the work.
+- `APP_INGEST_MYSQL_ENABLED=true` and `APP_INGEST_ELASTICSEARCH_ENABLED=true`
+  set here (both default `false` locally) — this is the single switch that
+  makes the compose deployment self-populating on every boot, safe to repeat
+  because of the ingestion pipeline's existing wipe-and-reload idempotency
+  guarantee (verified: a `docker compose restart app` re-ran both flows and
+  landed on 194/194 again, not 388).
+- No healthcheck added on `app` itself — nothing else in the compose file
+  depends on it, and adding one would mean either a new dependency (Actuator,
+  just for a health endpoint) or repurposing a business endpoint
+  (`GET /categories`) as a pseudo-healthcheck; neither adds real operational
+  value for a single-container demo deployment.
+
+Verified against the live stack (not just a successful `docker compose build`):
+full stack up, both ingestion flows ran automatically inside the container
+(`Database JDBC URL [jdbc:mysql://mysql:3306/ecommerce]` confirms the
+container-hostname profile activated correctly, not `localhost`), all three
+endpoints (`/categories`, `/products/{id}`, `/products?query=`) reachable from
+outside the container, and a restart re-ran ingestion idempotently.
+
 ## Naming conventions (decided)
 
 Project/artifact: ecommerce-api · package: dev.aryan.ecommerceapi ·
@@ -321,10 +397,84 @@ Design choices:
   verifies mappings at boot but never mutates the schema.
 - open-in-view: false — avoids the OSIV anti-pattern (hidden N+1s, connections
   held across the whole request); fetching is deliberate in the service layer.
-- Lean dependency list — started at 4 starters; two more added during ingestion
-  for concrete, load-bearing reasons (RestClient auto-configuration moved to its
-  own Boot 4.1 module; kotlinx-coroutines for the one place concurrency
-  genuinely helps) — nothing speculative.
+- Lean dependency list — started at 4 starters; three more added since, each
+  for a concrete, load-bearing reason (RestClient auto-configuration moved to
+  its own Boot 4.1 module; kotlinx-coroutines for the one place concurrency
+  genuinely helps; Bean Validation to replace ad-hoc `require()` checks with
+  declarative `page`/`size` bounds after two real validation bugs) — nothing
+  speculative.
+- REST list results (`GET /products`) mirror the ES document's flat/denormalized
+  fields; full detail (`GET /products/{id}`) is read fresh from MySQL and
+  includes everything the list view deliberately omits (dimensions, warranty/
+  shipping/return, sku, barcode, reviews, images) — same MySQL-source-of-truth/
+  ES-derived-index split applied consistently at the API layer, not just internally.
+  Mapping (entity/document -> response DTO) is Kotlin extension functions,
+  matching the ingestion package's convention, not a mapper class.
+- `GET /products/{id}`'s single-product detail fetch reuses the inherited
+  `findById` inside a `@Transactional(readOnly = true)` service method, letting
+  `category`/`brand` lazy-load in-scope, rather than a bulk JOIN FETCH query
+  (that pattern exists in ingestion specifically to avoid N+1 across 194
+  products — irrelevant for a single entity's 2 lazy singular associations).
+- 404 for a missing product id is a plain nullable service return +
+  `ResponseEntity.notFound().build()` in the controller — no
+  `@RestControllerAdvice`/custom exception introduced for what was initially a
+  single error case.
+- `page`/`size` validation went through two more real bugs before landing,
+  each an uncaught exception surfacing as a 500 instead of a 400 — found by
+  manual testing, not anticipated upfront:
+  1. `?size=0` (or negative `page`/`size`): `PageRequest.of()` throws a plain
+     `IllegalArgumentException`, which Spring MVC does not auto-map to 400.
+  2. `?size=50000` (or a large `page` combined with a normal `size`, e.g.
+     `page=150&size=100`): Elasticsearch itself rejects `from(=page*size)+size`
+     above its default `index.max_result_window` (10,000) with a
+     `search_phase_execution_exception` — also an uncaught exception, also a 500.
+  - The question this raised: should every such case just be caught generically
+    (a catch-all exception handler) instead of patched one at a time? Decided
+    against — client input errors (4xx) and genuine server errors (5xx) carry
+    different meaning callers rely on (e.g. retry logic treats 5xx as
+    transient, 4xx as "fix your request"); a catch-all can't tell them apart
+    and would misclassify one as the other. The real fix was to declare valid
+    input shape upfront instead of discovering it reactively.
+  - Final shape: `page >= 0` and `1 <= size <= 100` are declared with plain
+    Jakarta Bean Validation (`@Min`/`@Max` directly on the `@RequestParam`s,
+    needs the `spring-boot-starter-validation` dependency) — Spring MVC (6.1+)
+    auto-maps a resulting `HandlerMethodValidationException` to 400 with zero
+    custom handler code. **Trap**: adding `@Validated` on the controller class
+    (the "obvious" way to enable this) is actively wrong here — it activates
+    Spring's *older* AOP-based method validation (`MethodValidationInterceptor`,
+    predates the web-specific mechanism, applies to any Spring bean) instead,
+    which throws `jakarta.validation.ConstraintViolationException` — NOT
+    auto-mapped to 400, so it still 500'd until `@Validated` was removed and
+    the framework's automatic per-parameter validation (present once a
+    `Validator` bean exists on the classpath) was allowed to handle it alone.
+    The `page*size + size <= 10_000` rule stays as an explicit `require()` in
+    `ProductSearchQueryBuilder` — it's a cross-field business rule (interacts
+    with a runtime ES setting), not a simple bound on one parameter, so
+    `@Min`/`@Max` can't express it; the controller's
+    `@ExceptionHandler(IllegalArgumentException::class)` still exists for
+    exactly this one case.
+- Blank (empty-string or whitespace-only) `query`/`category` params are treated
+  as absent, not as their literal value — Elasticsearch's `multi_match`/`term`
+  queries analyze an empty string to zero terms and match ZERO documents (not
+  "match everything"), which would silently break any client that sends `""`
+  instead of omitting the param entirely (e.g. a search box left blank).
+  Normalized once in `ProductSearchQueryBuilder` rather than at every call site.
+- App Dockerfile is a multi-stage build (JDK to compile/package, JRE to run) —
+  smaller final image, no compiler needed just to execute a jar. Dependency
+  resolution (`./gradlew dependencies`) runs in its own layer before `COPY
+  src`, so it's only invalidated when `build.gradle.kts` changes, not on every
+  source edit.
+- Container-hostname wiring is a dedicated Spring profile
+  (`application-docker.yaml`) overriding only the two connection URLs, not a
+  duplicated full config file — everything else (credentials, JPA settings,
+  ingest flags) inherits from the base `application.yaml`. Profile activation
+  is injected via compose `environment:`, not baked into the image, since it's
+  a deployment concern, not an image property.
+- The compose `app` service gates on `mysql`/`elasticsearch` via `depends_on:
+  condition: service_healthy` (not just "container started") — this, plus the
+  ingestion pipeline's existing wipe-and-reload idempotency, is what makes
+  `docker compose up` alone safe and self-populating on both first boot and
+  every subsequent restart, with zero custom wait-for-it scripting.
 
 Known limitations / trade-offs (state honestly, each is deliberate):
 - Reviewer identity not normalized (no users table) — source data has no stable
@@ -361,6 +511,13 @@ Known limitations / trade-offs (state honestly, each is deliberate):
   decoupling is for operational flexibility (e.g. rebuilding the search index
   alone after an ES mapping change, without re-fetching from dummyjson), not
   a claim that they auto-stay in sync.
+- The compose `app` service has no `HEALTHCHECK`/Docker healthcheck of its
+  own (unlike `mysql`/`elasticsearch`) — nothing else in the compose file
+  depends on it, and adding one would mean either a new dependency (Actuator,
+  just for a health endpoint) or repurposing a business endpoint as a
+  pseudo-healthcheck; neither was judged worth it for a single-container demo
+  deployment. `depends_on: condition: service_healthy` on its own two
+  dependencies is what actually matters for correct startup ordering.
 
 README tone: plain and factual, first person, short rationale per point — not
 marketing language. Structure: How to run · Architecture overview · Design
