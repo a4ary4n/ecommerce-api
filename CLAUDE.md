@@ -80,11 +80,16 @@ DONE:
   containers (194/194 products, both directions, idempotent) — see Ingestion
   section below for the full design
 - REST endpoints: `GET /categories`, `GET /products/{id}` (MySQL-backed), and
-  `GET /products` (Elasticsearch-backed: `query`/`category`/`page`/`size` only
-  so far — `brand`/`minPrice`/`maxPrice`/`sort` and Tier 2 `minRating`/`inStock`
-  deliberately deferred). All verified against the live containers, including
-  edge cases (blank query/category, out-of-range page, invalid page/size -> 400
-  not 500).
+  `GET /products` (Elasticsearch-backed). `GET /products` now supports the
+  full assignment-required set (`query`, `category`, `page`, `size`) plus all
+  the additional/enhancement params from CLAUDE.md's Tier 1 and Tier 2 lists:
+  `brand`, `minPrice`/`maxPrice`, `sort` (`price_asc`/`price_desc`/
+  `rating_desc`), `minRating`, `inStock` — see the README ledger for exactly
+  which params are baseline vs. enhancement, so the eventual README frames
+  them accordingly rather than blending them together. All verified against
+  the live containers, including edge cases (blank query/category/brand,
+  out-of-range page, invalid page/size/minPrice/minRating -> 400 not 500,
+  unrecognized `sort` value -> 400, `inStock=false` behaves as "no filter").
 - App Dockerfile (multi-stage: `eclipse-temurin:17-jdk` build stage running
   `./gradlew bootJar`, `eclipse-temurin:17-jre` runtime stage) + `app` service
   added to `docker-compose.yml`, gated on `mysql`/`elasticsearch` via
@@ -101,10 +106,7 @@ DONE:
   ingestion / REST endpoints / app Dockerfile+compose / ...)
 
 PENDING (in order):
-1. Extra `GET /products` params: `brand`, `minPrice`/`maxPrice`, `sort` (Tier 1
-   extras deferred from the search endpoint pass) and, if time, Tier 2
-   (`minRating`, `inStock`)
-2. README (written by you, from the ledger below)
+1. README (written by you, from the ledger below) — the only thing left
 
 ## MySQL schema — 7 tables (FINAL, do not alter without discussion)
 
@@ -164,14 +166,20 @@ Mapping decisions:
   fuzziness AUTO
 - ?category= -> term filter on category keyword (filter context, no scoring)
 - query+category combine: bool { must: [multi_match], filter: [term] }
-- Extra params (Tier 1, build): page/size (ES from/size), sort=price_asc|price_desc|
-  rating_desc (sort replaces _score; default is relevance when query present),
-  brand=, minPrice=/maxPrice= (range filter)
-- Tier 2 if time: minRating=, inStock=
+- Extra params (Tier 1, DONE): page/size (ES from/size), sort=price_asc|price_desc|
+  rating_desc (sort replaces _score; default is relevance when query present,
+  title.keyword ascending otherwise; unrecognized sort value -> 400, not a
+  silent fallback), brand= (term filter on brand.keyword), minPrice=/maxPrice=
+  (range filter, either/both independently)
+- Tier 2 (DONE): minRating= (range filter, gte only), inStock= (true -> term
+  filter on availabilityStatus=IN_STOCK; false/absent -> no filter at all,
+  checkbox-style semantics, not an inverted filter)
 - Deliberately NOT built: tags filter, minDiscount, NL query parsing ("perfumes
   under $10" — query-understanding is out of scope; structured params instead).
   Currency: do NOT add a currency column (see README ledger).
-- One composable query builder handles all param combinations.
+- One composable query builder handles all param combinations — confirmed:
+  every param above is an independent optional branch in the same bool query,
+  no special-casing needed as they were added incrementally.
 
 ## Endpoints (assignment-required)
 
@@ -453,12 +461,42 @@ Design choices:
     `@Min`/`@Max` can't express it; the controller's
     `@ExceptionHandler(IllegalArgumentException::class)` still exists for
     exactly this one case.
-- Blank (empty-string or whitespace-only) `query`/`category` params are treated
-  as absent, not as their literal value — Elasticsearch's `multi_match`/`term`
-  queries analyze an empty string to zero terms and match ZERO documents (not
-  "match everything"), which would silently break any client that sends `""`
-  instead of omitting the param entirely (e.g. a search box left blank).
-  Normalized once in `ProductSearchQueryBuilder` rather than at every call site.
+- Blank (empty-string or whitespace-only) `query`/`category`/`brand` params are
+  treated as absent, not as their literal value — Elasticsearch's
+  `multi_match`/`term` queries analyze an empty string to zero terms and match
+  ZERO documents (not "match everything"), which would silently break any
+  client that sends `""` instead of omitting the param entirely (e.g. a search
+  box left blank). Normalized once in `ProductSearchQueryBuilder` rather than
+  at every call site.
+- **`GET /products` beyond the assignment baseline** — `query`, `category`,
+  `page`, `size` are the assignment-required set; `brand`, `minPrice`/
+  `maxPrice`, `sort`, `minRating`, `inStock` are additional search
+  capabilities layered on top (CLAUDE.md's own Tier 1/Tier 2 lists), and the
+  README should present them that way — enhancements demonstrating the
+  composable-query-builder design extends cleanly, not baseline requirements.
+  Implementation notes:
+  - `brand` filters on `brand.keyword` (the exact sub-field), not the analyzed
+    `brand` text field used for full-text matching in `multi_match` — same
+    keyword-vs-text distinction as `category`.
+  - `minPrice`/`maxPrice` set `gte`/`lte` independently on one range filter
+    (either or both may be given); an inverted range (`minPrice > maxPrice`)
+    isn't specially rejected — ES just returns zero results, a valid if
+    unhelpful answer, not worth a cross-field check.
+  - `minRating` is `gte`-only; ES range queries naturally exclude documents
+    missing the field (rating is nullable), no special null-handling needed.
+  - `inStock=true` filters to `availabilityStatus=IN_STOCK`; `false` or absent
+    applies no filter at all — deliberately checkbox-style ("only show
+    in-stock") rather than an inverted "only show out-of-stock" filter, which
+    would be a less natural default for most UIs.
+  - An unrecognized `sort` value is a 400 (`IllegalArgumentException` via the
+    existing controller handler), not a silent fallback to default ordering —
+    a deliberate behavior change once real params existed to validate,
+    consistent with the page/size validate-at-the-boundary lesson above rather
+    than quietly swallowing bad input.
+  - `minPrice`/`maxPrice` get `@DecimalMin("0.0")` (negative prices aren't
+    meaningful); `minRating` gets `@DecimalMin("0.0") @DecimalMax("5.0")`
+    (dummyjson's actual rating scale) — genuine domain-shape constraints, not
+    just defensive copy-paste from the page/size incident.
 - App Dockerfile is a multi-stage build (JDK to compile/package, JRE to run) —
   smaller final image, no compiler needed just to execute a jar. Dependency
   resolution (`./gradlew dependencies`) runs in its own layer before `COPY
