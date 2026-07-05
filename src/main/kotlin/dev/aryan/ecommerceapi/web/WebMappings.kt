@@ -4,9 +4,11 @@ import dev.aryan.ecommerceapi.entity.Category
 import dev.aryan.ecommerceapi.entity.Product
 import dev.aryan.ecommerceapi.entity.ProductImage
 import dev.aryan.ecommerceapi.entity.Review
+import dev.aryan.ecommerceapi.search.ProductDocument
 import dev.aryan.ecommerceapi.web.dto.CategorySummary
 import dev.aryan.ecommerceapi.web.dto.ProductDetailResponse
 import dev.aryan.ecommerceapi.web.dto.ProductImageResponse
+import dev.aryan.ecommerceapi.web.dto.ProductSummaryResponse
 import dev.aryan.ecommerceapi.web.dto.ReviewResponse
 
 fun Category.toSummary(): CategorySummary = CategorySummary(
@@ -26,6 +28,22 @@ fun Review.toResponse(): ReviewResponse = ReviewResponse(
 fun ProductImage.toResponse(): ProductImageResponse = ProductImageResponse(
     url = url,
     sortOrder = sortOrder,
+)
+
+fun ProductDocument.toSummaryResponse(): ProductSummaryResponse = ProductSummaryResponse(
+    id = id.toInt(),
+    title = title,
+    description = description,
+    category = category,
+    brand = brand,
+    tags = tags,
+    price = price,
+    discountPercentage = discountPercentage,
+    rating = rating,
+    stock = stock,
+    availabilityStatus = availabilityStatus,
+    thumbnail = thumbnail,
+    createdAt = createdAt,
 )
 
 fun Product.toDetailResponse(
