@@ -221,8 +221,18 @@ config/       the RestClient bean used to call dummyjson
   exception that *isn't* auto-mapped to 400. Removing it and letting Spring's newer,
   built-in per-parameter validation handle it alone was the actual fix. The one rule
   that can't be expressed as a simple per-field bound — `page*size+size` staying
-  under Elasticsearch's limit — is a cross-field business rule, handled explicitly
-  and still mapped to 400 via a small `IllegalArgumentException` handler.
+  under Elasticsearch's limit, and rejecting an unrecognized `sort` value — is a
+  cross-field business rule, thrown as a dedicated `InvalidSearchParameterException`
+  and mapped to 400 via a small handler. It's a dedicated exception type rather than
+  plain `IllegalArgumentException` for a reason found during final testing: a bad
+  `/products/{id}` path variable (e.g. `/products/abc`) fails with a
+  `NumberFormatException`, which *is* an `IllegalArgumentException` — a handler
+  declared against that broad type was silently swallowing it too, returning the
+  correct 400 but with a raw JDK parsing message instead of Spring's normal error
+  body. Both cases returned 400, so it was invisible until the response bodies were
+  compared directly. Narrowing the handler's exception type to one only the two
+  real business rules above throw fixed it without touching Spring's own handling
+  of the path-variable case.
 - **A blank `query`/`category`/`brand` parameter is treated as if it were absent**,
   not as its literal empty-string value. Elasticsearch's query/term matching treats
   an empty string as zero search terms and matches *zero* documents, not "match

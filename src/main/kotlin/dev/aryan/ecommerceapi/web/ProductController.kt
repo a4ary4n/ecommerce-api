@@ -1,5 +1,6 @@
 package dev.aryan.ecommerceapi.web
 
+import dev.aryan.ecommerceapi.search.InvalidSearchParameterException
 import dev.aryan.ecommerceapi.service.ProductDetailService
 import dev.aryan.ecommerceapi.service.ProductSearchService
 import dev.aryan.ecommerceapi.web.dto.PageResponse
@@ -63,13 +64,16 @@ class ProductController(
      * Spring MVC (6.1+) auto-maps the resulting `HandlerMethodValidationException` to 400,
      * no handler needed for those. What `@Min`/`@Max` can't express is `page*size+size <=
      * 10_000` (Elasticsearch's `index.max_result_window`) or an unrecognized `sort` value -
-     * both cross-field/business rules enforced via `require()`/`throw` in
-     * [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.search.ProductSearchQueryBuilder],
-     * which throws a plain [IllegalArgumentException] - not auto-mapped to 400 by Spring MVC
-     * by default, hence this handler.
+     * both cross-field/business rules thrown as
+     * [InvalidSearchParameterException][dev.aryan.ecommerceapi.search.InvalidSearchParameterException]
+     * from [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.search.ProductSearchQueryBuilder].
+     * Deliberately a dedicated exception type, not plain [IllegalArgumentException] - a bad
+     * `/products/{id}` path variable produces a [NumberFormatException] (itself an
+     * `IllegalArgumentException`), which would otherwise be caught by this same handler and
+     * leak a raw JDK parsing message instead of falling through to Spring's own 400 handling.
      */
-    @ExceptionHandler(IllegalArgumentException::class)
-    fun handleInvalidRequest(ex: IllegalArgumentException): ResponseEntity<Map<String, String?>> {
+    @ExceptionHandler(InvalidSearchParameterException::class)
+    fun handleInvalidRequest(ex: InvalidSearchParameterException): ResponseEntity<Map<String, String?>> {
         log.warn("rejected request: {}", ex.message)
         return ResponseEntity.badRequest().body(mapOf("error" to ex.message))
     }

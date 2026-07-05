@@ -468,12 +468,28 @@ Design choices:
     auto-mapped to 400, so it still 500'd until `@Validated` was removed and
     the framework's automatic per-parameter validation (present once a
     `Validator` bean exists on the classpath) was allowed to handle it alone.
-    The `page*size + size <= 10_000` rule stays as an explicit `require()` in
+    The `page*size + size <= 10_000` rule stays as an explicit check in
     `ProductSearchQueryBuilder` — it's a cross-field business rule (interacts
     with a runtime ES setting), not a simple bound on one parameter, so
-    `@Min`/`@Max` can't express it; the controller's
-    `@ExceptionHandler(IllegalArgumentException::class)` still exists for
-    exactly this one case.
+    `@Min`/`@Max` can't express it.
+  - **A third bug, found during the final full test pass**: the controller's
+    `@ExceptionHandler(IllegalArgumentException::class)` was also silently
+    catching `GET /products/{id}` requests with a non-numeric `id` (e.g.
+    `/products/abc`) — Spring's path-variable conversion failure surfaces as a
+    plain `NumberFormatException`, which *is* an `IllegalArgumentException`,
+    so it got routed to this handler instead of Spring's own default
+    `MethodArgumentTypeMismatchException` handling. Both paths returned 400,
+    so this was invisible to the earlier test passes — the only observable
+    difference was the response body: a raw JDK message
+    (`"For input string: \"abc\""`) instead of Spring's normal error shape.
+    Fixed by introducing a dedicated `InvalidSearchParameterException` (in
+    `search/ProductSearchQueryBuilder.kt`) thrown only by the two real
+    cross-field checks above, and re-targeting the controller's handler at
+    that specific type instead of the too-broad `IllegalArgumentException`.
+    General lesson: catching a broad standard-library exception type in a web
+    handler risks silently absorbing unrelated failures that happen to share
+    that supertype — worth a dedicated exception type per handler once more
+    than one throw site is involved.
 - Blank (empty-string or whitespace-only) `query`/`category`/`brand` params are
   treated as absent, not as their literal value — Elasticsearch's
   `multi_match`/`term` queries analyze an empty string to zero terms and match
@@ -501,8 +517,8 @@ Design choices:
     applies no filter at all — deliberately checkbox-style ("only show
     in-stock") rather than an inverted "only show out-of-stock" filter, which
     would be a less natural default for most UIs.
-  - An unrecognized `sort` value is a 400 (`IllegalArgumentException` via the
-    existing controller handler), not a silent fallback to default ordering —
+  - An unrecognized `sort` value is a 400 (`InvalidSearchParameterException`
+    via the controller handler), not a silent fallback to default ordering —
     a deliberate behavior change once real params existed to validate,
     consistent with the page/size validate-at-the-boundary lesson above rather
     than quietly swallowing bad input.

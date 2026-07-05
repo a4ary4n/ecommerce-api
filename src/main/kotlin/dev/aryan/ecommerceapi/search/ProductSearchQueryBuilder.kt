@@ -7,6 +7,14 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.elasticsearch.client.elc.NativeQuery
 
+/**
+ * A `GET /products` query parameter combination that's structurally invalid - as opposed to
+ * plain [IllegalArgumentException], which is too broad a type to catch safely at the
+ * controller (e.g. a bad `/products/{id}` path variable produces a [NumberFormatException],
+ * which *is* an [IllegalArgumentException] and would otherwise be caught by the same handler).
+ */
+class InvalidSearchParameterException(message: String) : RuntimeException(message)
+
 // Pure ProductSearchParams -> NativeQuery construction, no Spring wiring needed - kept
 // separate from ProductSearchService, mirroring how ingestion split writer/reader/indexer
 // by responsibility.
@@ -25,14 +33,16 @@ object ProductSearchQueryBuilder {
      * `minPrice`/`maxPrice`/`minRating`/`inStock` (term/range filters, filter-context - no
      * scoring cost). Every param is an independent optional branch in the same bool query.
      *
-     * @throws IllegalArgumentException if `page*size+size` exceeds Elasticsearch's
+     * @throws InvalidSearchParameterException if `page*size+size` exceeds Elasticsearch's
      *   `index.max_result_window`, or if `params.sort` is non-null and not one of
      *   `price_asc`/`price_desc`/`rating_desc`.
      */
     fun build(params: ProductSearchParams): NativeQuery {
         val from = params.page.toLong() * params.size
-        require(from + params.size <= MAX_RESULT_WINDOW) {
-            "page*size + size must not exceed $MAX_RESULT_WINDOW (Elasticsearch's index.max_result_window)"
+        if (from + params.size > MAX_RESULT_WINDOW) {
+            throw InvalidSearchParameterException(
+                "page*size + size must not exceed $MAX_RESULT_WINDOW (Elasticsearch's index.max_result_window)"
+            )
         }
         // blank ("" or whitespace-only) is treated the same as absent - otherwise an empty
         // multi_match/term query analyzes to zero terms and matches ZERO documents in ES
@@ -109,7 +119,7 @@ object ProductSearchQueryBuilder {
             null -> if (query == null) {
                 builder.withSort { s -> s.field { f -> f.field("title.keyword").order(SortOrder.Asc) } }
             }
-            else -> throw IllegalArgumentException("sort must be one of: price_asc, price_desc, rating_desc")
+            else -> throw InvalidSearchParameterException("sort must be one of: price_asc, price_desc, rating_desc")
         }
 
         return builder.build()
