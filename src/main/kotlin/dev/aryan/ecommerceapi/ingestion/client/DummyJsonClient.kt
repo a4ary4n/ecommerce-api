@@ -8,11 +8,15 @@ import org.springframework.core.ParameterizedTypeReference
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 
+/** Thin HTTP client for the two dummyjson endpoints ingestion needs. */
 @Component
 class DummyJsonClient(private val dummyJsonRestClient: RestClient) {
 
-    // limit=0 is dummyjson's documented way to return every item in one call.
-    // RestClient is blocking, so the actual HTTP call is offloaded to Dispatchers.IO.
+    /**
+     * All products in one call, via `limit=0` (dummyjson's documented way to return every
+     * item rather than the default-30 page). `RestClient` is blocking, so the call is
+     * offloaded to [Dispatchers.IO].
+     */
     suspend fun fetchAllProducts(): DummyJsonProductListResponse = withContext(Dispatchers.IO) {
         dummyJsonRestClient.get()
             .uri("/products?limit=0")
@@ -20,7 +24,10 @@ class DummyJsonClient(private val dummyJsonRestClient: RestClient) {
             .body(DummyJsonProductListResponse::class.java)!!
     }
 
-    // raw JSON array, no envelope - the only source of proper category display names
+    /**
+     * All categories (a raw JSON array, no envelope) - the only source of proper category
+     * display names; a product's own `category` field is just the slug.
+     */
     suspend fun fetchCategories(): List<DummyJsonCategoryDto> = withContext(Dispatchers.IO) {
         dummyJsonRestClient.get()
             .uri("/products/categories")

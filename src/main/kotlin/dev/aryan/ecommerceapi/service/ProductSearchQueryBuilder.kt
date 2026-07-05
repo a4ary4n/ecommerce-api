@@ -17,6 +17,16 @@ object ProductSearchQueryBuilder {
     // same pattern as the page/size >= 0/1 check PageRequest.of() already enforces.
     private const val MAX_RESULT_WINDOW = 10_000L
 
+    /**
+     * Builds the single composable Elasticsearch query backing `GET /products`, from every
+     * optional [params] field: `query` (multi_match, must-context) and `category`/`brand`/
+     * `minPrice`/`maxPrice`/`minRating`/`inStock` (term/range filters, filter-context - no
+     * scoring cost). Every param is an independent optional branch in the same bool query.
+     *
+     * @throws IllegalArgumentException if `page*size+size` exceeds Elasticsearch's
+     *   `index.max_result_window`, or if `params.sort` is non-null and not one of
+     *   `price_asc`/`price_desc`/`rating_desc`.
+     */
     fun build(params: ProductSearchParams): NativeQuery {
         val from = params.page.toLong() * params.size
         require(from + params.size <= MAX_RESULT_WINDOW) {

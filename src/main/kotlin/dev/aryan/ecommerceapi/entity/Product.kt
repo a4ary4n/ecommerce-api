@@ -14,6 +14,32 @@ import org.hibernate.type.SqlTypes
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
+/**
+ * A single product, mirroring one row of the `products` table - the full-detail
+ * source for `GET /products/{id}`. A denormalized, search-relevant subset of these
+ * fields is also indexed into [dev.aryan.ecommerceapi.search.ProductDocument].
+ *
+ * @property id Reuses dummyjson's own product id (no `@GeneratedValue`) - a stable
+ *   natural key, avoiding a pointless remapping layer.
+ * @property description Mapped `@JdbcTypeCode(SqlTypes.LONGVARCHAR)`, not `@Lob` - the
+ *   MySQL column is `TEXT`, which reports as JDBC `LONGVARCHAR`; `@Lob` expects
+ *   `LONGTEXT` and fails `ddl-auto: validate`.
+ * @property category Required (`NOT NULL` in the schema).
+ * @property brand Nullable - dummyjson has genuinely brandless products (e.g. groceries).
+ * @property price Exact [java.math.BigDecimal], never `Double` - money needs exactness
+ *   that binary floating point can't guarantee.
+ * @property discountPercentage Also [java.math.BigDecimal]; nullable to match the DDL
+ *   exactly (has a `DEFAULT` but no `NOT NULL`).
+ * @property rating Stored as given from the source, never recomputed from [Review] rows
+ *   - the embedded reviews are a partial sample, not the population the rating was
+ *   originally computed from.
+ * @property availabilityStatus Machine-readable stock status; see [AvailabilityStatus].
+ * @property createdAt The *source's* own creation timestamp (dummyjson's `meta.createdAt`),
+ *   never fabricated.
+ * @property updatedAt When *this system* last touched the row - set to the ingestion
+ *   run's timestamp on load, meant to be bumped again by future product-modifying
+ *   endpoints; deliberately not the source's own `meta.updatedAt`.
+ */
 @Entity
 @Table(name = "products")
 class Product(

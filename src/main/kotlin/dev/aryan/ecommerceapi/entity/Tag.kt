@@ -7,6 +7,13 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 
+/**
+ * A free-form product tag (e.g. "fruits", "mascara"), many-to-many with [Product]
+ * via [ProductTag].
+ *
+ * @property id Database-assigned identity, `null` until first persisted.
+ * @property name Tag text; unique, doubles as the natural key ingestion resolves by.
+ */
 @Entity
 @Table(name = "tags")
 class Tag(

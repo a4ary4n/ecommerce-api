@@ -20,6 +20,11 @@ import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 
+/**
+ * Wipes and reloads the entire MySQL catalog from dummyjson data - the write half of the
+ * dummyjson -> MySQL ingestion flow. Safe to run repeatedly (every container boot):
+ * every call deletes all 7 tables in FK-safe order and rebuilds from scratch.
+ */
 @Component
 class ProductCatalogWriter(
     private val categoryRepository: CategoryRepository,
@@ -32,6 +37,13 @@ class ProductCatalogWriter(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /**
+     * Wipes all 7 tables, seeds categories from [categories], then persists [products] and
+     * their reviews/images/tags. Brands and tags are resolved-or-created via an in-memory
+     * cache for the duration of this call (safe since the tables were just wiped - no need
+     * to check for pre-existing rows). Products with an unknown category slug or an
+     * unrecognized `availabilityStatus` are skipped and logged, not treated as fatal.
+     */
     @Transactional
     fun reload(categories: List<DummyJsonCategoryDto>, products: List<DummyJsonProductDto>) {
         wipeAll()
@@ -81,6 +93,7 @@ class ProductCatalogWriter(
         log.info("reload complete: {} persisted, {} skipped", products.size - skipped, skipped)
     }
 
+    /** Deletes all 7 tables in FK-safe (children-first) order. */
     private fun wipeAll() {
         productTagRepository.deleteAllInBatch()
         reviewRepository.deleteAllInBatch()
@@ -91,6 +104,10 @@ class ProductCatalogWriter(
         tagRepository.deleteAllInBatch()
     }
 
+    /**
+     * Persists [categories] fresh (table was just wiped) and returns a slug -> [Category]
+     * lookup for resolving each product's category during the main load loop.
+     */
     private fun seedCategories(categories: List<DummyJsonCategoryDto>): Map<String, Category> =
         categoryRepository.saveAll(categories.map { Category(slug = it.slug, name = it.name) })
             .associateBy { it.slug }

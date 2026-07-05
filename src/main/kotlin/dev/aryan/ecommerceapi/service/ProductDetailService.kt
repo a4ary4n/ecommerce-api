@@ -9,6 +9,7 @@ import dev.aryan.ecommerceapi.web.toDetailResponse
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
+/** Backs `GET /products/{id}` - full product detail, read fresh from MySQL. */
 @Service
 class ProductDetailService(
     private val productRepository: ProductRepository,
@@ -16,8 +17,13 @@ class ProductDetailService(
     private val productImageRepository: ProductImageRepository,
     private val productTagRepository: ProductTagRepository,
 ) {
-    // readOnly transaction keeps the session open so product.category/product.brand
-    // (both LAZY) can resolve here despite open-in-view: false
+    /**
+     * Full detail for one product, or `null` if [id] doesn't exist. `readOnly` keeps the
+     * Hibernate session open so `product.category`/`product.brand` (both `LAZY`) can
+     * resolve here despite `open-in-view: false` - a single entity's 2 lazy singular
+     * associations, not the bulk N+1 concern [ProductRepository.findAllWithCategoryAndBrand]
+     * exists for.
+     */
     @Transactional(readOnly = true)
     fun getById(id: Int): ProductDetailResponse? {
         val product = productRepository.findById(id).orElse(null) ?: return null

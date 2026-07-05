@@ -8,8 +8,10 @@ import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
-// Step 1 of 2: dummyjson -> MySQL. Independently triggerable from the ES reindex step
-// (ProductSearchIndexService), which only ever reads MySQL - never a parallel dummyjson fetch.
+/**
+ * Step 1 of 2: dummyjson -> MySQL. Independently triggerable from the ES reindex step
+ * ([ProductSearchIndexService]), which only ever reads MySQL - never a parallel dummyjson fetch.
+ */
 @Service
 class ProductCatalogSyncService(
     private val dummyJsonClient: DummyJsonClient,
@@ -17,6 +19,10 @@ class ProductCatalogSyncService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /**
+     * Fetches categories and all products from dummyjson concurrently (two independent
+     * HTTP calls), then wipes and reloads MySQL from the result via [ProductCatalogWriter].
+     */
     suspend fun sync() = coroutineScope {
         // two independent HTTP calls - fetched concurrently
         val categoriesDeferred = async { dummyJsonClient.fetchCategories() }

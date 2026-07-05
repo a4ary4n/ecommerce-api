@@ -3,6 +3,11 @@ package dev.aryan.ecommerceapi.web.dto
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
+/**
+ * `GET /products/{id}` response shape - full product detail from MySQL, including
+ * everything [ProductSummaryResponse] (the list/search view) deliberately omits:
+ * dimensions, warranty/shipping/return, sku, barcode, reviews, and images.
+ */
 data class ProductDetailResponse(
     val id: Int,
     val title: String,

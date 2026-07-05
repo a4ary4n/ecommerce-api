@@ -10,6 +10,14 @@ import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 
+/**
+ * A single product image URL, mirroring one row of the `product_images` table.
+ *
+ * @property url Image location; display-only, never queried, hence not part of the
+ *   flat [dev.aryan.ecommerceapi.search.ProductDocument].
+ * @property sortOrder Display order among a product's images; `Short` (not `Int`) to
+ *   match the MySQL `SMALLINT` column.
+ */
 @Entity
 @Table(name = "product_images")
 class ProductImage(

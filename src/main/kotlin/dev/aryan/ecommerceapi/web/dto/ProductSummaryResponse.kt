@@ -2,7 +2,11 @@ package dev.aryan.ecommerceapi.web.dto
 
 import java.time.LocalDateTime
 
-// Mirrors ProductDocument - deliberately NOT full detail (full detail is /products/{id} from MySQL)
+/**
+ * `GET /products` list/search result shape - mirrors
+ * [ProductDocument][dev.aryan.ecommerceapi.search.ProductDocument] field-for-field.
+ * Deliberately NOT full detail; see [ProductDetailResponse] for that (`GET /products/{id}`, from MySQL).
+ */
 data class ProductSummaryResponse(
     val id: Int,
     val title: String,

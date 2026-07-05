@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
+/** `GET /products` (list/search/filter, Elasticsearch-backed) and `GET /products/{id}` (full detail, MySQL-backed). */
 @RestController
 @RequestMapping("/products")
 class ProductController(
@@ -25,6 +26,13 @@ class ProductController(
     private val productDetailService: ProductDetailService,
 ) {
 
+    /**
+     * List, full-text search, and filter products. `query`/`category`/`page`/`size` are the
+     * assignment-required baseline; `brand`/`minPrice`/`maxPrice`/`sort`/`minRating`/
+     * `inStock` are additional search capabilities layered on top (see [ProductSearchParams]
+     * and [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.service.ProductSearchQueryBuilder]
+     * for exactly how each param behaves).
+     */
     @GetMapping
     fun search(
         @RequestParam query: String?,
@@ -42,19 +50,22 @@ class ProductController(
             ProductSearchParams(query, category, brand, minPrice, maxPrice, minRating, inStock, sort, page, size)
         )
 
+    /** Full product detail, or 404 if [id] doesn't exist. */
     @GetMapping("/{id}")
     fun getById(@PathVariable id: Int): ResponseEntity<ProductDetailResponse> =
         productDetailService.getById(id)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()
 
-    // page/size structural bounds (page >= 0, 1 <= size <= 100) are declared above via
-    // @Min/@Max - Spring MVC (6.1+) maps a HandlerMethodValidationException from those
-    // automatically to 400, no handler needed here for that case.
-    //
-    // What @Min/@Max can't express: page*size + size <= 10_000 (Elasticsearch's
-    // index.max_result_window) is a cross-field business rule, not a simple bound on one
-    // parameter - ProductSearchQueryBuilder enforces it via require(), which throws a plain
-    // IllegalArgumentException. That type isn't auto-mapped to 400 by Spring MVC by default,
-    // so this handler stays for that one case specifically.
+    /**
+     * Maps cross-field business-rule violations to 400. `page`/`size`'s simple structural
+     * bounds (`page >= 0`, `1 <= size <= 100`) are declared via `@Min`/`@Max` above instead -
+     * Spring MVC (6.1+) auto-maps the resulting `HandlerMethodValidationException` to 400,
+     * no handler needed for those. What `@Min`/`@Max` can't express is `page*size+size <=
+     * 10_000` (Elasticsearch's `index.max_result_window`) or an unrecognized `sort` value -
+     * both cross-field/business rules enforced via `require()`/`throw` in
+     * [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.service.ProductSearchQueryBuilder],
+     * which throws a plain [IllegalArgumentException] - not auto-mapped to 400 by Spring MVC
+     * by default, hence this handler.
+     */
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleInvalidRequest(ex: IllegalArgumentException): ResponseEntity<Map<String, String?>> =
         ResponseEntity.badRequest().body(mapOf("error" to ex.message))

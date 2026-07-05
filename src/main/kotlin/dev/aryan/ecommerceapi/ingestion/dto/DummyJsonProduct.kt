@@ -1,5 +1,6 @@
 package dev.aryan.ecommerceapi.ingestion.dto
 
+/** Raw response envelope from dummyjson's `GET /products`. */
 data class DummyJsonProductListResponse(
     val products: List<DummyJsonProductDto> = emptyList(),
     val total: Int = 0,
@@ -7,6 +8,13 @@ data class DummyJsonProductListResponse(
     val limit: Int = 0,
 )
 
+/**
+ * Raw shape of one product from dummyjson. Field names match the source JSON exactly
+ * (already camelCase), so no `@JsonProperty` renaming is needed anywhere here.
+ *
+ * [brand] being absent (not `null`) in the source JSON for brandless products relies on
+ * `jackson-module-kotlin` filling the Kotlin default when the key is missing.
+ */
 data class DummyJsonProductDto(
     val id: Int,
     val title: String,
@@ -32,12 +40,17 @@ data class DummyJsonProductDto(
     val thumbnail: String? = null,
 )
 
+/** Raw shape of a product's physical dimensions from dummyjson. */
 data class DummyJsonDimensionsDto(
     val width: Double? = null,
     val height: Double? = null,
     val depth: Double? = null,
 )
 
+/**
+ * Raw shape of one embedded review from dummyjson. [date] is an ISO-8601 string, parsed via
+ * `String?.toSourceTimestamp()` in `dev.aryan.ecommerceapi.ingestion.ProductMappings`.
+ */
 data class DummyJsonReviewDto(
     val rating: Int,
     val comment: String? = null,
@@ -46,6 +59,7 @@ data class DummyJsonReviewDto(
     val reviewerEmail: String? = null,
 )
 
+/** Raw shape of a product's `meta` block from dummyjson - source timestamps and identifiers. */
 data class DummyJsonMetaDto(
     val createdAt: String? = null,
     val updatedAt: String? = null,

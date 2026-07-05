@@ -7,6 +7,15 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 
+/**
+ * A product brand (e.g. "Apple", "Samsung").
+ *
+ * Resolved-or-created during ingestion as products are processed - dummyjson has no
+ * separate brands endpoint, so [name] is the only identifying data available.
+ *
+ * @property id Database-assigned identity, `null` until first persisted.
+ * @property name Brand name; unique, doubles as the natural key ingestion resolves by.
+ */
 @Entity
 @Table(name = "brands")
 class Brand(

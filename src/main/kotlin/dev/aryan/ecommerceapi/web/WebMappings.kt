@@ -11,12 +11,14 @@ import dev.aryan.ecommerceapi.web.dto.ProductImageResponse
 import dev.aryan.ecommerceapi.web.dto.ProductSummaryResponse
 import dev.aryan.ecommerceapi.web.dto.ReviewResponse
 
+/** Maps a [Category] entity to its `GET /categories` / nested detail response shape. */
 fun Category.toSummary(): CategorySummary = CategorySummary(
     id = id!!, // IDENTITY-generated, always populated once persisted/read back
     slug = slug,
     name = name,
 )
 
+/** Maps a [Review] entity to its `GET /products/{id}` response shape. */
 fun Review.toResponse(): ReviewResponse = ReviewResponse(
     rating = rating,
     comment = comment,
@@ -25,11 +27,13 @@ fun Review.toResponse(): ReviewResponse = ReviewResponse(
     reviewDate = reviewDate,
 )
 
+/** Maps a [ProductImage] entity to its `GET /products/{id}` response shape. */
 fun ProductImage.toResponse(): ProductImageResponse = ProductImageResponse(
     url = url,
     sortOrder = sortOrder,
 )
 
+/** Maps a [ProductDocument] search hit to `GET /products`'s list-result response shape. */
 fun ProductDocument.toSummaryResponse(): ProductSummaryResponse = ProductSummaryResponse(
     id = id.toInt(),
     title = title,
@@ -46,6 +50,11 @@ fun ProductDocument.toSummaryResponse(): ProductSummaryResponse = ProductSummary
     createdAt = createdAt,
 )
 
+/**
+ * Maps a [Product] entity (plus its separately-fetched [reviews]/[images]/[tags], since
+ * `Product` deliberately has no collection fields for these) to `GET /products/{id}`'s
+ * full-detail response shape.
+ */
 fun Product.toDetailResponse(
     reviews: List<Review>,
     images: List<ProductImage>,

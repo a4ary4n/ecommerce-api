@@ -8,9 +8,14 @@ import dev.aryan.ecommerceapi.web.toSummaryResponse
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations
 import org.springframework.stereotype.Service
 
+/** Backs `GET /products`'s list/search/filter behavior. */
 @Service
 class ProductSearchService(private val elasticsearchOperations: ElasticsearchOperations) {
 
+    /**
+     * Runs the query [ProductSearchQueryBuilder] builds from [params] and maps the
+     * resulting [ProductDocument]s into a paginated response.
+     */
     fun search(params: ProductSearchParams): PageResponse<ProductSummaryResponse> {
         val nativeQuery = ProductSearchQueryBuilder.build(params)
         val hits = elasticsearchOperations.search(nativeQuery, ProductDocument::class.java)
