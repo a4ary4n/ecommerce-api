@@ -1,15 +1,18 @@
 # =============================================================
-# Local development infrastructure: MySQL + Elasticsearch
+# ecommerce-api: app + MySQL + Elasticsearch
 # Usage:
-#   docker compose up -d      -> start both services (detached)
+#   docker compose up -d      -> build (if needed) and start all three services
 #   docker compose ps         -> check status
-#   docker compose logs -f    -> tail logs
+#   docker compose logs -f    -> tail logs (add a service name to scope it, e.g. `app`)
 #   docker compose down       -> stop (data survives via volumes)
 #   docker compose down -v    -> stop AND wipe data (clean slate)
 #
-# The Spring Boot app runs from IntelliJ during development and
-# connects to these via localhost. The app joins this file as a
-# third service (with its own Dockerfile) at the end of the project.
+# `docker compose up` alone is enough: the app waits for mysql/elasticsearch to
+# report healthy, then both ingestion flows run automatically on boot (dummyjson
+# -> MySQL, then MySQL -> Elasticsearch), so the API has real data immediately.
+#
+# For local dev from IntelliJ instead (against localhost ports, no ingest-on-boot),
+# just don't start the `app` service: `docker compose up -d mysql elasticsearch`.
 # =============================================================
 
 services:
@@ -46,6 +49,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce-app
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      APP_INGEST_MYSQL_ENABLED: "true"
+      APP_INGEST_ELASTICSEARCH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
 
 volumes:
   mysql_data:
