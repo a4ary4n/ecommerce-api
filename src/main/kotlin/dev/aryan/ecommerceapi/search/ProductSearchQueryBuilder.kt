@@ -1,4 +1,4 @@
-package dev.aryan.ecommerceapi.service
+package dev.aryan.ecommerceapi.search
 
 import co.elastic.clients.elasticsearch._types.SortOrder
 import co.elastic.clients.elasticsearch._types.query_dsl.Query

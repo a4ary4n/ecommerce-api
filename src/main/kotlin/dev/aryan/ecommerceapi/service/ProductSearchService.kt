@@ -1,6 +1,7 @@
 package dev.aryan.ecommerceapi.service
 
 import dev.aryan.ecommerceapi.search.ProductDocument
+import dev.aryan.ecommerceapi.search.ProductSearchQueryBuilder
 import dev.aryan.ecommerceapi.web.dto.PageResponse
 import dev.aryan.ecommerceapi.web.dto.ProductSearchParams
 import dev.aryan.ecommerceapi.web.dto.ProductSummaryResponse

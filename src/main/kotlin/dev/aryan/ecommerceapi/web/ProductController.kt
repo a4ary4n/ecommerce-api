@@ -30,7 +30,7 @@ class ProductController(
      * List, full-text search, and filter products. `query`/`category`/`page`/`size` are the
      * assignment-required baseline; `brand`/`minPrice`/`maxPrice`/`sort`/`minRating`/
      * `inStock` are additional search capabilities layered on top (see [ProductSearchParams]
-     * and [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.service.ProductSearchQueryBuilder]
+     * and [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.search.ProductSearchQueryBuilder]
      * for exactly how each param behaves).
      */
     @GetMapping
@@ -62,7 +62,7 @@ class ProductController(
      * no handler needed for those. What `@Min`/`@Max` can't express is `page*size+size <=
      * 10_000` (Elasticsearch's `index.max_result_window`) or an unrecognized `sort` value -
      * both cross-field/business rules enforced via `require()`/`throw` in
-     * [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.service.ProductSearchQueryBuilder],
+     * [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.search.ProductSearchQueryBuilder],
      * which throws a plain [IllegalArgumentException] - not auto-mapped to 400 by Spring MVC
      * by default, hence this handler.
      */

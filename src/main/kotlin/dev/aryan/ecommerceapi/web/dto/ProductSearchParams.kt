@@ -2,7 +2,7 @@ package dev.aryan.ecommerceapi.web.dto
 
 /**
  * Parsed `GET /products` query params, passed to
- * [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.service.ProductSearchQueryBuilder].
+ * [ProductSearchQueryBuilder][dev.aryan.ecommerceapi.search.ProductSearchQueryBuilder].
  *
  * @property query Free-text search term (multi_match, must-context). `null`/blank means
  *   no text query - a filter-only (or fully open) listing.
